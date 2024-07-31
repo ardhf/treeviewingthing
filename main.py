@@ -7,11 +7,50 @@ from matplotlib.figure import Figure
 
 # Define the Node class
 class Node:
-    def __init__(self, role, content, parent=None):
+    def __init__(self, role, content, parent=None, tool_call_id=None, name=None):
         self.parent = parent
         self.role = role
+        self.tool_call_id = tool_call_id
+        self.name = name
         self.content = content
         self.children = []
+
+
+# Function to traverse up the tree and convert the messages to json
+def messages_to_json(current_node):
+    stack = []  # Stack of dictionaries of messages
+    # Goes through all the nodes up to the root and puts their info in correct order into stack
+    while current_node.parent is not None:
+        # Add tool-specific fields if the role is "tool"
+        if current_node.role != "tool":
+            message = {
+                "role": current_node.role,
+                "content": current_node.content
+            }
+        else:
+            message = {
+                "role": current_node.role,
+                "tool_call_id": current_node.tool_call_id,
+                "name": current_node.name,
+                "content": current_node.content
+            }
+
+        stack.append(message)
+        current_node = current_node.parent
+
+    stack.reverse()
+
+    result = {"messages": stack}
+
+    return json.dumps(result)
+
+
+# This function is called when the jump into convo button is clicked
+def jump_into_convo():
+    global selected_node
+
+    if selected_node is not None:
+        print(messages_to_json(selected_node))
 
 
 # Function to handle adding a child node
@@ -19,19 +58,24 @@ def branch_from_node():
     global selected_node, ax, tree, canvas
 
     if selected_node is not None:
-        new_node_name = selected_node.children[0].role # Puts the same name as the child
-        if new_node_name:
-            new_node = Node(new_node_name, new_node_name)
-            selected_node.children.append(new_node)
 
-            # Clear and redraw plot
-            ax.clear()
-            ax.set_xlim(-10, 10)
-            ax.set_ylim(-2, depth * step_y + 2)
-            ax.axis('off')
+        if selected_node.children != []: # Cannot branch from a leaf node
 
-            plot_tree(ax, tree, 0, depth * step_y, step_x, step_y)
-            canvas.draw()
+            new_node_name = selected_node.children[0].role # Puts the same name as the child
+            if new_node_name:
+                new_node = Node(new_node_name, new_node_name, selected_node)
+                selected_node.children.append(new_node)
+
+                # Clear and redraw plot
+                ax.clear()
+                ax.set_xlim(-10, 10)
+                ax.set_ylim(-2, depth * step_y + 2)
+                ax.axis('off')
+
+                plot_tree(ax, tree, 0, depth * step_y, step_x, step_y)
+                canvas.draw()
+        else:
+            print('Not allowed to branch from a leaf node')
 
 # Function to handle node click event
 def on_node_click(event):
@@ -44,7 +88,7 @@ def on_node_click(event):
             current_annotation = None
 
         for node, (x, y) in node_positions.items():
-            if abs(event.xdata - x) < 1 and abs(event.ydata - y) < 1:
+            if abs(event.xdata - x) < 0.75 and abs(event.ydata - y) < 0.75:
                 selected_node = node
                 context_menu(event)
                 # Update text widget with information about the clicked node
@@ -92,7 +136,10 @@ def create_sample_tree():
     youngest = root
 
     for message in result['messages']:
-        newNode = Node(message['role'], message['content'], youngest)
+        if 'tool_call_id' in message:
+            newNode = Node(message['role'], message['content'], youngest, message['tool_call_id'], message['name'])
+        else:
+            newNode = Node(message['role'], message['content'], youngest)
         youngest.children = [newNode]
         youngest = newNode
 
@@ -146,6 +193,9 @@ control_frame.pack_propagate(False)
 control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
 
 add_button = tk.Button(control_frame, text="Branch from this node", command=branch_from_node)
+add_button.pack(pady=5)
+
+add_button = tk.Button(control_frame, text="Jump into this conversation", command=jump_into_convo)
 add_button.pack(pady=5)
 
 # Create a frame for the scrollable text widget
