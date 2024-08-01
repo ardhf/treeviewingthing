@@ -1,56 +1,51 @@
 import tkinter as tk
 import json
-import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
+from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage, ToolCall, BaseMessage
 
+# Highlight current convo you are in
 
 # Define the Node class
 class Node:
-    def __init__(self, role, content, parent=None, tool_call_id=None, name=None):
+    def __init__(self, message, parent=None):
         self.parent = parent
-        self.role = role
-        self.tool_call_id = tool_call_id
-        self.name = name
-        self.content = content
+        self.message = message
         self.children = []
 
 
 # Function to traverse up the tree and convert the messages to json
-def messages_to_json(current_node):
-    stack = []  # Stack of dictionaries of messages
-    # Goes through all the nodes up to the root and puts their info in correct order into stack
-    while current_node.parent is not None:
-        # Add tool-specific fields if the role is "tool"
-        if current_node.role != "tool":
-            message = {
-                "role": current_node.role,
-                "content": current_node.content
-            }
-        else:
-            message = {
-                "role": current_node.role,
-                "tool_call_id": current_node.tool_call_id,
-                "name": current_node.name,
-                "content": current_node.content
-            }
-
-        stack.append(message)
-        current_node = current_node.parent
-
-    stack.reverse()
-
-    result = {"messages": stack}
-
-    return json.dumps(result)
-
-
-# This function is called when the jump into convo button is clicked
-def jump_into_convo():
+def messages_to_json(is_leaf=False):
     global selected_node
 
     if selected_node is not None:
-        print(messages_to_json(selected_node))
+        current_node = selected_node
+        stack = []  # Stack of dictionaries of messages
+
+        # Goes through all the nodes up to the root and puts their info in correct order into stack
+        while current_node is not None:
+            # Add tool-specific fields if the role is "tool"
+            message = {
+                "role": current_node.message.type,
+                "content": current_node.message.content
+            }
+
+            # We want AI to generate its response
+            if stack == [] and current_node.message.type == 'assistant' and is_leaf is False:
+                continue  # If wanting to regen AI response, skip generating the node unless its a leaf node
+
+            stack.append(message)
+            current_node = current_node.parent
+
+        stack.reverse()
+
+        result = {"messages": stack}
+
+        return json.dumps(result)
+
+
+def save_tree():
+    print('saved tree')
 
 
 # Function to handle adding a child node
@@ -58,29 +53,26 @@ def branch_from_node():
     global selected_node, ax, tree, canvas
 
     if selected_node is not None:
-
         if selected_node.children != []: # Cannot branch from a leaf node
+            new_node = Node(BaseMessage(content='placeholder content', type=selected_node.children[0].message.type), selected_node)
+            selected_node.children.append(new_node)
 
-            new_node_name = selected_node.children[0].role # Puts the same name as the child
-            if new_node_name:
-                new_node = Node(new_node_name, new_node_name, selected_node)
-                selected_node.children.append(new_node)
+            # Clear and redraw plot
+            ax.clear()
+            ax.set_xlim(-10, 10)
+            ax.set_ylim(-4, depth * step_y + 2)
+            ax.axis('on')
 
-                # Clear and redraw plot
-                ax.clear()
-                ax.set_xlim(-10, 10)
-                ax.set_ylim(-2, depth * step_y + 2)
-                ax.axis('off')
-
-                plot_tree(ax, tree, 0, depth * step_y, step_x, step_y)
-                canvas.draw()
+            plot_tree(ax, tree, 0, depth * step_y, step_x, step_y)
+            canvas.draw()
+            print(messages_to_json())
         else:
-            print('Not allowed to branch from a leaf node')
+            print('Not allowed to branch from a leaf node, jumping into conversation instead')
+            print(messages_to_json(is_leaf=True))
 
 # Function to handle node click event
 def on_node_click(event):
     global selected_node, current_annotation, text_widget
-
     if event.inaxes is not None:
         # Clear existing annotation if present
         if current_annotation:
@@ -88,14 +80,13 @@ def on_node_click(event):
             current_annotation = None
 
         for node, (x, y) in node_positions.items():
-            if abs(event.xdata - x) < 0.75 and abs(event.ydata - y) < 0.75:
+            if abs(event.xdata - x) < 0.4 and abs(event.ydata - y) < 0.4:
                 selected_node = node
                 context_menu(event)
                 # Update text widget with information about the clicked node
                 text_widget.config(state=tk.NORMAL)
                 text_widget.delete('1.0', tk.END)
-                text_widget.insert(tk.END, f"Selected Node: {node.role}\n\n"
-                                           f"{node.content}")
+                text_widget.insert(tk.END, f"Selected Node: {node.message.type}\n\n{node.message.content}")
                 text_widget.config(state=tk.DISABLED)
                 break
 
@@ -105,7 +96,7 @@ def context_menu(event):
 
     if selected_node is not None:
         current_annotation = ax.annotate(
-            "Enter child node name:",
+            "Selected Node",
             xy=(event.xdata, event.ydata),
             xycoords='data',
             xytext=(-40, 20),
@@ -118,8 +109,15 @@ def context_menu(event):
 # Function to recursively add nodes to the plot
 def plot_tree(ax, node, x, y, step_x, step_y):
     global node_positions
-    ax.text(x, y, node.role, bbox=dict(facecolor='lightblue', alpha=0.5),
-            ha='center', va='center', fontsize=12)
+    if node.message.type == 'system':
+        ax.text(x, y, 'system', bbox=dict(facecolor='#ffffff', alpha=1), ha='center', va='center', fontsize=12)
+    elif node.message.type == 'user':
+        ax.text(x, y, 'user', bbox=dict(facecolor='#aaa', alpha=1), ha='center', va='center', fontsize=12)
+    elif node.message.type == 'assistant':
+        ax.text(x, y, 'assistant', bbox=dict(facecolor='#97dcfc', alpha=1), ha='center', va='center', fontsize=12)
+    elif node.message.type == 'tool':
+        ax.text(x, y, 'tool', bbox=dict(facecolor='#97fca1', alpha=1), ha='center', va='center', fontsize=12)
+
     node_positions[node] = (x, y)
 
     # Calculate positions for children
@@ -130,31 +128,87 @@ def plot_tree(ax, node, x, y, step_x, step_y):
             ax.plot([x, x - child_spacing + i * step_x], [y, y - step_y], 'k-')
 
 # Sample tree structure
-def create_sample_tree():
-    root = Node("Conversation", "Conversation")
+def create_tree():
+    base_message = BaseMessage(type='system', content=result['messages'][0]['content'])
+    root = Node(base_message)
 
     youngest = root
 
     for message in result['messages']:
-        if 'tool_call_id' in message:
-            newNode = Node(message['role'], message['content'], youngest, message['tool_call_id'], message['name'])
-        else:
-            newNode = Node(message['role'], message['content'], youngest)
-        youngest.children = [newNode]
-        youngest = newNode
+        if message['role'] == 'system':
+            continue
+        elif message['role'] == 'user':
+            base_message = BaseMessage(type='user', content=message['content'])
+            new_node = Node(base_message, youngest)
+        elif message['role'] == 'assistant':
+            base_message = BaseMessage(type='assistant', content=message['content'])
+            new_node = Node(base_message, youngest)
+        elif message['role'] == 'tool':
+            base_message = BaseMessage(type='tool', content=message['content'])
+            new_node = Node(base_message, youngest)
+
+        youngest.children = [new_node]
+        youngest = new_node
 
     return root
 
 # Load and parse the JSON
-messages = {"messages": [{"role": "system",
-                          "content": "You are a helpful assistant with access to the following functions. Use them if required -\n{\n    \"type\": \"function\",\n    \"function\": {\n        \"name\": \"execute_python\",\n        \"description\": \"Run a command in a python interpreter\",\n        \"parameters\": {\n            \"type\": \"object\",\n            \"properties\": {\n                \"code\": {\n                    \"type\": \"string\",\n                    \"description\": \"Python code to execute\",\n                }\n            },\n            \"required\": [\"code\"],\n        }\n    }\n}\n                \nTo use these functions respond with:\n<functioncall>\n{\n    \"name\": \"function_name\",\n    \"arguments\": {\n        \"arg_1\": \"value_1\",\n        \"arg_1\": \"value_1\",\n         ...\n    }\n}\n</functioncall>\n\nEdge cases you must handle:\n - If there are no functions that match the user request, you will respond politely that you cannot help.\n\nThe data is found in ./data/WiGLE.json"},
-                         {"role": "user", "content": "Create a histogram for all of the netid OUIs"},
-                         {"role": "assistant",
-                          "content": "<functioncall>\n{\n    \"name\": \"execute_python\",\n    \"arguments\": {\n        \"code\": {\"code\":\"import pandas as pd\\nimport matplotlib.pyplot as plt\\n\\n# Load data from JSON file\\nfile_path = './data/WiGLE.json'\\ndata = pd.read_json(file_path)\\n\\n# Extract the OUI (first 8 characters of netid)\\ndata['OUI'] = data['netid'].str[:8]\\n\\n# Plot histogram\\nplt.figure(figsize=(10, 6))\\ndata['OUI'].value_counts().plot(kind='bar')\\nplt.title('Histogram of NetID OUIs')\\nplt.xlabel('OUI')\\nplt.ylabel('Frequency')\\nplt.show()\"}\n    }\n}\n</functioncall>\n"},
-                         {"role": "tool", "tool_call_id": "call_0oiQmRKvKAZAoXRFPpXE7gp5", "name": "execute_python",
-                          "content": "Figure(1000x600)\nAxes(0.125,0.11;0.775x0.77)\nText(0.5, 1.0, 'Histogram of NetID OUIs')\nText(0.5, 0, 'OUI')\nText(0, 0.5, 'Frequency')\n"},
-                         {"role": "assistant",
-                          "content": "Here is the histogram showing the distribution of the first 8 characters of the `netid` (OUI) from the dataset. Each bar represents the frequency of a specific OUI in the data."}]}
+messages = {"messages": [
+        {
+            "content": "You are a helpful assistant with access to the following functions. Use them if required -\n{\n    \"type\": \"function\",\n    \"function\": {\n        \"name\": \"execute_python\",\n        \"description\": \"Run a command in a python interpreter\",\n        \"parameters\": {\n            \"type\": \"object\",\n            \"properties\": {\n                \"code\": {\n                    \"type\": \"string\",\n                    \"description\": \"Python code to execute\",\n                }\n            },\n            \"required\": [\"code\"],\n        }\n    }\n}\n                \nTo use these functions respond with:\n<functioncall>\n{\n    \"name\": \"function_name\",\n    \"arguments\": {\n        \"arg_1\": \"value_1\",\n        \"arg_1\": \"value_1\",\n        ...\n    }\n}\n</functioncall>\n\nEdge cases you must handle:\n- If there are no functions that match the user request, you will respond politely that you cannot help.\n\nThe data is found in /tmp/xPdsFYju.kismet\n",
+            "role": "system"
+        },
+        {
+            "content": "What devices was responsible for the greatest number of the captured packets?",
+            "role": "user"
+        },
+        {
+            "content": "<functioncall>\n{\n    \"name\": \"execute_python\",\n    \"arguments\": {\n        \"code\": \"import sqlite3\nimport pandas as pd\n\n# Connect to the SQLite database\nconn = sqlite3.connect('/tmp/xPdsFYju.kismet')\n\n# Load packets table into a pandas DataFrame\npackets_df = pd.read_sql_query('SELECT * FROM packets', conn)\n\n# Count the number of packets per device (using devkey)\npacket_counts = packets_df['devkey'].value_counts()\n\n# Find the device responsible for the greatest number of packets\nmost_packets_device = packet_counts.idxmax()\nmost_packets_device\"\n    }\n}\n</functioncall>",
+            "role": "assistant"
+        },
+        {
+            "content": "0\n",
+            "role": "tool"
+        },
+        {
+            "content": "<functioncall>\n{\n    \"name\": \"execute_python\",\n    \"arguments\": {\n        \"code\": \"# Display the packet counts for all devices\npacket_counts\"\n    }\n}\n</functioncall>",
+            "role": "assistant"
+        },
+        {
+            "content": "devkey\n0    335113\nName: count, dtype: int64\n",
+            "role": "tool"
+        },
+        {
+            "content": "<functioncall>\n{\n    \"name\": \"execute_python\",\n    \"arguments\": {\n        \"code\": \"# Count the number of packets per source MAC address\nsource_mac_counts = packets_df['sourcemac'].value_counts()\n\n# Count the number of packets per destination MAC address\ndest_mac_counts = packets_df['destmac'].value_counts()\n\nsource_mac_counts, dest_mac_counts\"\n    }\n}\n</functioncall>",
+            "role": "assistant"
+        },
+        {
+            "content": "(sourcemac\nE0:C2:64:C0:B0:66    8365\nD0:21:F9:B3:0E:B1    7702\n00:E0:4C:97:61:3F    6727\nD2:21:F9:A3:01:BB    5885\nD2:21:F9:A3:01:BA    5499\n                     ... \nD6:F2:70:74:CC:7C       1\nE8:B5:D0:74:40:83       1\nAE:03:49:EB:52:E9       1\n2C:DC:D7:17:1E:E1       1\n3C:BD:C5:F0:4C:A3       1\nName: count, Length: 11714, dtype: int64, destmac\nFF:FF:FF:FF:FF:FF    130492\nE0:C2:64:C0:B0:66      6637\nD2:21:F9:A3:01:BB      5659\n68:72:51:3E:69:A4      5255\n00:E0:4C:97:61:3F      5246\n                      ...  \n56:7D:4D:15:5D:B5         1\n74:75:48:29:26:9C         1\nD6:6D:0E:E5:37:D5         1\n18:78:D4:35:86:82         1\n20:D7:78:93:90:53         1\nName: count, Length: 7825, dtype: int64)\n",
+            "role": "tool"
+        },
+        {
+            "content": "Here are the results for the source and destination MAC addresses with the highest packet counts:\n\n### Source MAC Addresses\n1. **E0:C2:64:C0:B0:66**: 8365 packets\n2. **D0:21:F9:B3:0E:B1**: 7702 packets\n3. **00:E0:4C:97:61:3F**: 6727 packets\n4. **D2:21:F9:A3:01:BB**: 5885 packets\n5. **D2:21:F9:A3:01:BA**: 5499 packets\n\n### Destination MAC Addresses\n1. **FF:FF:FF:FF:FF:FF** (Broadcast): 130492 packets\n2. **E0:C2:64:C0:B0:66**: 6637 packets\n3. **D2:21:F9:A3:01:BB**: 5659 packets\n4. **68:72:51:3E:69:A4**: 5255 packets\n5. **00:E0:4C:97:61:3F**: 5246 packets\n\nThe broadcast address `FF:FF:FF:FF:FF:FF` has the highest number of packets as the destination, which is expected in network traffic.\n\nThe MAC address **E0:C2:64:C0:B0:66** appears prominently as both a source and destination, indicating it is likely responsible for a significant portion of the captured packets.\n\nWould you like to investigate this specific device further or perform another analysis?",
+            "role": "assistant"
+        },
+        {
+            "content": "Tell me more about E0:C2:64:C0:B0:66",
+            "role": "user"
+        },
+        {
+            "content": "<functioncall>\n{\n    \"name\": \"execute_python\",\n    \"arguments\": {\n        \"code\": \"# Query the devices table for information about the device with MAC address E0:C2:64:C0:B0:66\nquery = '''\nSELECT * FROM devices WHERE devmac = 'E0:C2:64:C0:B0:66'\n'''\ndevice_info = pd.read_sql_query(query, conn)\ndevice_info\"\n    }\n}\n</functioncall>",
+            "role": "assistant"
+        },
+        {
+            "content": "   first_time   last_time                         devkey  ... bytes_data      type                                             device\n0  1718034753  1718037106  4202770D00000000_66B0C064C2E0  ...     230981  Wi-Fi AP  b'{\"kismet.device.base.first_time\": 1718034753...\n\n[1 rows x 15 columns]\n",
+            "role": "tool"
+        },
+        {
+            "content": "Here's the information about the device with MAC address **E0:C2:64:C0:B0:66**:\n\n| Column           | Value                                         |\n|------------------|-----------------------------------------------|\n| first_time       | 1718034753                                    |\n| last_time        | 1718037106                                    |\n| devkey           | 4202770D00000000_66B0C064C2E0                 |\n| phyname          | IEEE802.11                                    |\n| devmac           | E0:C2:64:C0:B0:66                             |\n| strongest_signal | -55                                           |\n| min_lat          | 39.130661                                     |\n| min_lon          | -76.809962                                    |\n| max_lat          | 39.131397                                     |\n| max_lon          | -76.809777                                    |\n| avg_lat          | 39.130888                                     |\n| avg_lon          | -76.809874                                    |\n| bytes_data       | 230981                                        |\n| type             | Wi-Fi AP                                      |\n| device           | (JSON blob with detailed device information)  |\n\nThe device is a Wi-Fi Access Point (AP) with the following characteristics:\n- **First Seen**: Timestamp 1718034753\n- **Last Seen**: Timestamp 1718037106\n- **Strongest Signal**: -55 dBm\n- **Location**: \n  - Minimum Latitude: 39.130661\n  - Minimum Longitude: -76.809962\n  - Maximum Latitude: 39.131397\n  - Maximum Longitude: -76.809777\n  - Average Latitude: 39.130888\n  - Average Longitude: -76.809874\n- **Bytes of Data**: 230981 bytes\n\nThe `device` column contains a JSON blob with detailed device information. Would you like to extract and analyze the contents of this JSON blob?",
+            "role": "assistant"
+        }
+    ]
+}
+
 json_str = json.dumps(messages)
 result = json.loads(json_str)
 
@@ -162,10 +216,10 @@ result = json.loads(json_str)
 selected_node = None
 node_positions = {}
 current_annotation = None
-tree = create_sample_tree()
-depth = 3  # manually set the depth of the tree
-step_x = 2.5  # horizontal spacing between nodes
-step_y = 2.0  # vertical spacing between levels
+tree = create_tree()
+depth = len(result['messages']) / 2  # manually set the depth of the tree
+step_x = 3.5  # horizontal spacing between nodes
+step_y = 1.0  # vertical spacing between levels
 
 # Create the Tkinter window
 root = tk.Tk()
@@ -173,11 +227,12 @@ root.title("Tree Visualizer")
 
 # Create a Matplotlib figure and axis
 fig = Figure(figsize=(8, 6))
-ax = fig.add_subplot(111)
+ax = fig.add_subplot(111) # Used 111 originially but dk what it does
+fig.subplots_adjust(left=0, right=1, top=1, bottom=0) # Makes the plot cover the entire canvas
 ax.set_title('Tree Structure Viewer')
 ax.set_xlim(-10, 10)
-ax.set_ylim(-2, depth * step_y + 2)
-ax.axis('off')
+ax.set_ylim(-4, depth * step_y + 2)
+ax.axis('on')
 
 # Plot the initial tree
 plot_tree(ax, tree, 0, depth * step_y, step_x, step_y)
@@ -192,11 +247,9 @@ control_frame = tk.Frame(root, width=400, height=500) # the size of the componen
 control_frame.pack_propagate(False)
 control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
 
-add_button = tk.Button(control_frame, text="Branch from this node", command=branch_from_node)
-add_button.pack(pady=5)
+tk.Button(control_frame, text="Branch from this node", command=branch_from_node).pack(pady=5)
 
-add_button = tk.Button(control_frame, text="Jump into this conversation", command=jump_into_convo)
-add_button.pack(pady=5)
+tk.Button(control_frame, text="Save Tree", command=save_tree).pack(pady=5)
 
 # Create a frame for the scrollable text widget
 text_frame = tk.Frame(control_frame)
@@ -212,10 +265,6 @@ text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
 # Configure the scrollbar
 scrollbar.config(command=text_widget.yview)
-
-# Add static text to the text widget
-text_widget.insert(tk.END, "Click on a node to select it and enter a child node name.")
-text_widget.config(state=tk.DISABLED)
 
 # Create and pack the Matplotlib navigation toolbar in the control frame
 toolbar = NavigationToolbar2Tk(canvas, control_frame)
