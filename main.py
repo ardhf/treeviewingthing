@@ -4,7 +4,6 @@ import sample_data
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage, ToolCall, BaseMessage
-from test_message_list import get_response
 
 
 # TODO: Highlight current convo you are in
