@@ -4,9 +4,22 @@ import sample_data
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage, ToolCall, BaseMessage
+from test_message_list import get_response
 
 
 # TODO: Highlight current convo you are in
+# TODO: Make zooming work with mouse
+# TODO: Fix hitboxes of messages in plot
+# TODO: Make messages fit on screen and make it look nice
+# TODO: Export the tree to save and come back to
+
+# Teddy ideas
+# TODO: Make chatlog like ChatGPT and button to open graph
+# TODO: hide graph by default
+# TODO: add a textbox at the bottom of left panel to talk to LLM
+# TODO: When clicking on a node, load all of the conversation up to that point into the window
+
+# ends when AI talks and does not call tool, either user input or end
 
 
 # message: a langchain BaseMessage with the type(aka role) and content parameters
@@ -86,7 +99,7 @@ def on_node_click(event):
                 # Update text widget with information about the clicked node
                 text_widget.config(state=tk.NORMAL)
                 text_widget.delete('1.0', tk.END)
-                text_widget.insert(tk.END, f"Selected Node: {node.message.type}\n\n{node.message.content}")
+                text_widget.insert(tk.END, f"Selected Node: {node.message.type}\n\ntool_call_id: {node.message.id}\n\ncontent: {node.message.content}")
                 text_widget.config(state=tk.DISABLED)
                 break
 
@@ -113,7 +126,7 @@ def plot_tree(ax, node, x, y, step_x, step_y):
     # Different roles have different colors
     match node.message.type:
         case 'system':
-            color='#fff'
+            color = '#fff'
         case 'user':
             color = '#aaa'
         case 'assistant':
@@ -132,7 +145,7 @@ def plot_tree(ax, node, x, y, step_x, step_y):
             plot_tree(ax, child, x - child_spacing + i * step_x, y - step_y, step_x, step_y)
             ax.plot([x, x - child_spacing + i * step_x], [y, y - step_y], 'k-')
 
-# Sample tree structure
+# Want to take in a list of langchain messages and turn it into a tree
 def create_tree():
     # All conversations start with a system node and there can only be one
     base_message = BaseMessage(type='system', content=result['messages'][0]['content'])
@@ -157,16 +170,52 @@ def plot_options():
     # Plot the initial tree
     plot_tree(ax, tree, 0, depth * step_y + 1, step_x, step_y)
 
-result = sample_data.conversation1  # Loads the first sample convo
 
+# Only used for testing
+# Converts a specified string of JSON into {"messages": x} where x is a list of langchain messages
+def json_to_messages(json_messages):
+    list_of_messages = []
+    result = json_messages
+    system_msg = SystemMessage(content=result['messages'][0]['content'])
+    list_of_messages.append(system_msg)
+
+    for message in result['messages'][1:]:
+        match message['role']:
+            case 'user':
+                curr_message = HumanMessage(content=message['content'])
+            case 'assistant':
+                # Checks if the AI message has tool calls
+                if 'tool_calls' in message:
+                    tool_prefix = message['tool_calls'][0]  # Makes the long json key lookup not look as ugly
+
+                    msg_tool_call = ToolCall(
+                        name=tool_prefix['tool_call']['name'],
+                        args=tool_prefix['tool_call']['arguments'],
+                        id=tool_prefix['id'])
+
+                    curr_message = AIMessage(content=message['content'], tool_calls=[msg_tool_call])
+                else:
+                    curr_message = AIMessage(content=message['content'])
+            case 'tool':
+                curr_message = ToolMessage(content=message['content'], tool_call_id=message['tool_call_id'], type=message['role'], name=message['name'])
+
+        list_of_messages.append(curr_message)
+
+    return list_of_messages
+
+
+result = sample_data.conversation1  # Loads the first sample convo
 
 # Global variables
 selected_node = None
 node_positions = {}
 current_annotation = None
 
+(json_to_messages(sample_data.conversation1))
+
 tree = create_tree()
-depth = len(result['messages']) / 2  # manually set the depth of the tree
+
+depth = len(result['messages']) / 1.5  # manually set the depth of the tree
 step_x = 3.5  # horizontal spacing between nodes
 step_y = 1.0  # vertical spacing between levels
 
