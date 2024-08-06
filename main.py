@@ -6,17 +6,13 @@ from matplotlib.figure import Figure
 from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage, ToolCall, BaseMessage
 
 
+# Not really TODOs but more of suggestions
 # TODO: Highlight current convo you are in
 # TODO: Make zooming work with mouse
 # TODO: Fix hitboxes of messages in plot
 # TODO: Make messages fit on screen and make it look nice
 # TODO: Export the tree to save and come back to
-
-# Teddy ideas
-# TODO: Make chatlog like ChatGPT and button to open graph
-# TODO: hide graph by default
 # TODO: add a textbox at the bottom of left panel to talk to LLM
-# TODO: When clicking on a node, load all of the conversation up to that point into the window
 
 # ends when AI talks and does not call tool, either user input or end
 
@@ -98,9 +94,32 @@ def on_node_click(event):
                 # Update text widget with information about the clicked node
                 text_widget.config(state=tk.NORMAL)
                 text_widget.delete('1.0', tk.END)
-                text_widget.insert(tk.END, f"Selected Node: {node.message.type}\n\ntool_call_id: {node.message.id}\n\ncontent: {node.message.content}")
+                text_widget.insert(tk.END, get_selected_convo(node))
+                text_widget.yview_moveto(1)
                 text_widget.config(state=tk.DISABLED)
                 break
+
+
+# Function to return a string of the entire conversation to the text window
+def get_selected_convo(selected_node):
+    messages = []
+    str = ''
+
+    while selected_node is not None:
+        messages.append('\n\n')
+        messages.append(selected_node.message.content)
+        messages.append('\nContent: ')
+        messages.append(selected_node.message.type)
+        messages.append('Role: ')
+        selected_node = selected_node.parent
+
+    messages.reverse()
+
+    for i in messages:
+        str += i
+
+    return str
+
 
 # Function to show context menu for creating a child node
 def context_menu(event):
@@ -202,6 +221,16 @@ def json_to_messages(json_messages):
 
     return list_of_messages
 
+# Uses a global var 'show' to toggle the graph
+def toggle_graph():
+    global show
+    if show:
+        canvas_widget.pack_forget()
+        show = False
+    else:
+        canvas_widget.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        show = True
+
 
 result = sample_data.conversation1  # Loads the first sample convo
 
@@ -209,6 +238,7 @@ result = sample_data.conversation1  # Loads the first sample convo
 selected_node = None
 node_positions = {}
 current_annotation = None
+show = False
 
 (json_to_messages(sample_data.conversation1))
 
@@ -233,7 +263,6 @@ plot_options()
 # Create a FigureCanvasTkAgg widget to embed the plot in Tkinter
 canvas = FigureCanvasTkAgg(fig, master=root)
 canvas_widget = canvas.get_tk_widget()
-canvas_widget.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
 # Create a frame for the controls (left side)
 control_frame = tk.Frame(root, width=400, height=500) # the size of the component that holds the text for each node
@@ -243,6 +272,8 @@ control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)  # Anchor left, fi
 # Create the buttons on the top left
 tk.Button(control_frame, text="Branch from this node", command=branch_from_node).pack(pady=5)
 tk.Button(control_frame, text="Save Tree", command=save_tree).pack(pady=5)
+tk.Button(control_frame, text="Toggle Graph", command=toggle_graph).pack(pady=5)
+
 
 # Create a frame for the scrollable text widget
 text_frame = tk.Frame(control_frame)
